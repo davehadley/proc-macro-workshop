@@ -10,8 +10,9 @@ use derive_builder::Builder;
 
 fn main() {
     #[derive(Builder)]
-    struct MyStruct {
+    pub struct MyStruct {
         value1: u32,
         value2: u64,
+        value3: Option<f64>,
     }
 }
