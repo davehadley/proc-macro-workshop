@@ -11,6 +11,7 @@ use derive_builder::Builder;
 fn main() {
     #[derive(Builder)]
     struct MyStruct {
-        value: u32,
+        value1: u32,
+        value2: u64,
     }
 }

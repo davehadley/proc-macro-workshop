@@ -52,14 +52,11 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
 }
 
 fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
+    let structname = &inputtree.ident;
     let builderstructname = get_builder_struct_name(inputtree);
 
     let fields: Vec<_> = get_struct_field_names_and_types(inputtree).collect();
-    let fieldsinitialvalues = fields.iter().map(|(name, _)| {
-        quote! {
-            #name: None
-        }
-    });
+    let fieldnames: Vec<_> = fields.iter().map(|(name, _)| *name).collect();
     let fieldsetters = fields.iter().map(|(name, ty)| {
         quote! {
             fn #name(&mut self, #name: #ty) -> &mut Self {
@@ -69,15 +66,37 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
         }
     });
 
+    let checkforunset = fieldnames.iter().map(|name| {
+        let msg = format!("{} must be set", name);
+        quote! {
+            let #name = match &self.#name {
+                Some(inner) => inner.clone(),
+                None => return Err(#msg.into()),
+            };
+        }
+    });
+    let buildmethod = quote! {
+        pub fn build(&mut self) -> Result<#structname, Box<dyn std::error::Error>> {
+            #(#checkforunset)*
+            Ok(
+                #structname {
+                    #(#fieldnames),*
+                }
+            )
+        }
+    };
+
     let output = quote! {
         impl #builderstructname {
             pub fn new() -> Self {
                 Self {
-                    #(#fieldsinitialvalues),*
+                    #(#fieldnames: None),*
                 }
             }
 
             #(#fieldsetters)*
+
+            #buildmethod
         }
     };
     output.into()
