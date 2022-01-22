@@ -1,7 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
+    parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident,
+    PathArguments, Type,
 };
 
 #[proc_macro_derive(Builder, attributes(builder))]
@@ -59,6 +60,7 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
     let builderstructname = get_builder_struct_name(inputtree);
     let newmethod = generate_builder_impl_new_method(inputtree);
     let fieldsetters = generate_builder_impl_field_setters(inputtree);
+    //let fieldelementsetters = generate_builder_impl_field_element_setters(inputtree);
     let buildmethod = generate_builder_impl_build_method(inputtree);
 
     let output = quote! {
@@ -66,6 +68,8 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
             #newmethod
 
             #(#fieldsetters)*
+
+            //#(fieldelementsetters)*
 
             #buildmethod
         }
@@ -89,6 +93,25 @@ fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStre
         .collect();
 
     fieldsetters
+}
+
+fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<TokenStream> {
+    let fields = get_struct_vec_fields(inputtree);
+    let fieldelementsetters = fields
+        .iter()
+        .map(|(field, attr)| {
+            let ty = get_vec_type_inner(&field.ty);
+            let name = parse_vec_attribute(*attr).unwrap().method_name;
+            quote! {
+                    fn #name(&mut self, #name: #ty) -> &mut Self {
+                        self.#name.push(#name);
+                        self
+                    }
+            }
+        })
+        .collect();
+
+    fieldelementsetters
 }
 
 fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
@@ -168,7 +191,7 @@ fn get_option_type_inner(ty: &Type) -> Option<&Type> {
             if seg.ident == "Option" {
                 if let PathArguments::AngleBracketed(args) = &seg.arguments {
                     if let Some(GenericArgument::Type(inner)) = args.args.first() {
-                        return Some(inner);
+                        return Some(&inner);
                     }
                 }
             }
@@ -177,6 +200,43 @@ fn get_option_type_inner(ty: &Type) -> Option<&Type> {
     None
 }
 
+fn get_vec_type_inner(ty: &Type) -> Option<&Type> {
+    todo!()
+}
+
 fn is_option_type(ty: &Type) -> bool {
     get_option_type_inner(ty).is_some()
+}
+
+fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
+    let fields = if let Data::Struct(datastruct) = &inputtree.data {
+        &datastruct.fields
+    } else {
+        unimplemented!()
+    };
+    if let Fields::Named(namedfields) = fields {
+        namedfields
+            .named
+            .iter()
+            .map(|field| {
+                let att = field.attrs.iter().filter(|att| todo!()).next();
+                (field, att)
+            })
+            .filter(|(field, att)| att.is_some())
+            .map(|(field, att)| (field, att.unwrap()))
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+struct ParsedVecAttribute {
+    method_name: String,
+}
+
+fn parse_vec_attribute(attr: &Attribute) -> Option<ParsedVecAttribute> {
+    None
+    // Some(ParsedVecAttribute {
+
+    // })
 }
