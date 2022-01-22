@@ -4,7 +4,7 @@ use syn::{
     parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
 };
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let inputtree = parse_macro_input!(input as DeriveInput);
 
