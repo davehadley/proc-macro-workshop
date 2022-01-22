@@ -54,10 +54,18 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
 fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
     let builderstructname = get_builder_struct_name(inputtree);
 
-    let fields = get_struct_field_names(inputtree);
-    let fields = fields.map(|name| {
+    let fields: Vec<_> = get_struct_field_names_and_types(inputtree).collect();
+    let fieldsinitialvalues = fields.iter().map(|(name, _)| {
         quote! {
             #name: None
+        }
+    });
+    let fieldsetters = fields.iter().map(|(name, ty)| {
+        quote! {
+            fn #name(&mut self, #name: #ty) -> &mut Self {
+                self.#name = Some(#name);
+                self
+            }
         }
     });
 
@@ -65,9 +73,11 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
         impl #builderstructname {
             pub fn new() -> Self {
                 Self {
-                    #(#fields),*
+                    #(#fieldsinitialvalues),*
                 }
             }
+
+            #(#fieldsetters)*
         }
     };
     output.into()
@@ -93,9 +103,9 @@ fn get_struct_field_names_and_types(
     fields
 }
 
-fn get_struct_field_names(inputtree: &DeriveInput) -> impl Iterator<Item = &Ident> {
-    get_struct_field_names_and_types(inputtree).map(|(name, _)| name)
-}
+// fn get_struct_field_names(inputtree: &DeriveInput) -> impl Iterator<Item = &Ident> {
+//     get_struct_field_names_and_types(inputtree).map(|(name, _)| name)
+// }
 
 fn get_builder_struct_name(inputtree: &DeriveInput) -> Ident {
     format_ident!("{}{}", inputtree.ident, "Builder")
