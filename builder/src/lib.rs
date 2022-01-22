@@ -1,18 +1,20 @@
-use proc_macro::TokenStream;
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
 };
 
 #[proc_macro_derive(Builder, attributes(builder))]
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let inputtree = parse_macro_input!(input as DeriveInput);
 
     let builderfactorycode = generate_builder_factory(&inputtree);
     let builderstructcode = generate_builder_struct(&inputtree);
     let builderimplcode = generate_builder_impl(&inputtree);
 
-    join([builderfactorycode, builderstructcode, builderimplcode])
+    let output = join([builderfactorycode, builderstructcode, builderimplcode]);
+
+    output.into()
 }
 
 fn join(iter: impl IntoIterator<Item = TokenStream>) -> TokenStream {
@@ -31,14 +33,14 @@ fn generate_builder_factory(inputtree: &DeriveInput) -> TokenStream {
             pub fn builder() -> #builderstructname { #builderstructname::new() }
         }
     };
-    output.into()
+    output
 }
 
 fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
     let builderstructname = get_builder_struct_name(inputtree);
 
     let fields = get_struct_field_names_and_types(inputtree);
-    let fields = fields.map(|(name, ty)| {
+    let fields = fields.iter().map(|(name, ty)| {
         let ty = get_option_type_inner(ty).unwrap_or(ty);
         quote! {
             #name: Option<#ty>
@@ -50,25 +52,48 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
             #(#fields),*
         }
     };
-    output.into()
+    output
 }
 
 fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
-    let structname = &inputtree.ident;
     let builderstructname = get_builder_struct_name(inputtree);
+    let newmethod = generate_builder_impl_new_method(inputtree);
+    let fieldsetters = generate_builder_impl_field_setters(inputtree);
+    let buildmethod = generate_builder_impl_build_method(inputtree);
 
-    let fields: Vec<_> = get_struct_field_names_and_types(inputtree).collect();
-    let fieldnames: Vec<_> = fields.iter().map(|(name, _)| *name).collect();
-    let fieldsetters = fields.iter().map(|(name, ty)| {
-        let ty = get_option_type_inner(ty).unwrap_or(ty);
-        quote! {
-                fn #name(&mut self, #name: #ty) -> &mut Self {
-                    self.#name = Some(#name);
-                    self
-                }
+    let output = quote! {
+        impl #builderstructname {
+            #newmethod
+
+            #(#fieldsetters)*
+
+            #buildmethod
         }
-    });
+    };
+    output
+}
 
+fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStream> {
+    let fields = get_struct_field_names_and_types(inputtree);
+    let fieldsetters = fields
+        .iter()
+        .map(|(name, ty)| {
+            let ty = get_option_type_inner(ty).unwrap_or(ty);
+            quote! {
+                    fn #name(&mut self, #name: #ty) -> &mut Self {
+                        self.#name = Some(#name);
+                        self
+                    }
+            }
+        })
+        .collect();
+
+    fieldsetters
+}
+
+fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
+    let fields = get_struct_field_names_and_types(inputtree);
+    let fieldnames = fields.iter().map(|(name, _)| name);
     let checkforunset = fields.iter().map(|(name, ty)| {
         if is_option_type(ty) {
             quote! { let #name = self.#name.clone(); }
@@ -82,6 +107,7 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
             }
         }
     });
+    let structname = &inputtree.ident;
     let buildmethod = quote! {
         pub fn build(&mut self) -> Result<#structname, Box<dyn std::error::Error>> {
             #(#checkforunset)*
@@ -93,25 +119,21 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
         }
     };
 
-    let output = quote! {
-        impl #builderstructname {
-            pub fn new() -> Self {
-                Self {
-                    #(#fieldnames: None),*
-                }
-            }
-
-            #(#fieldsetters)*
-
-            #buildmethod
-        }
-    };
-    output.into()
+    buildmethod
 }
 
-fn get_struct_field_names_and_types(
-    inputtree: &DeriveInput,
-) -> impl Iterator<Item = (&Ident, &Type)> {
+fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> TokenStream {
+    let fieldnames = get_struct_field_names(inputtree);
+    quote! {
+        pub fn new() -> Self {
+            Self {
+                #(#fieldnames: None),*
+            }
+        }
+    }
+}
+
+fn get_struct_field_names_and_types(inputtree: &DeriveInput) -> Vec<(&Ident, &Type)> {
     let fields = if let Data::Struct(datastruct) = &inputtree.data {
         &datastruct.fields
     } else {
@@ -126,12 +148,15 @@ fn get_struct_field_names_and_types(
         unimplemented!()
     };
 
-    fields
+    fields.collect()
 }
 
-// fn get_struct_field_names(inputtree: &DeriveInput) -> impl Iterator<Item = &Ident> {
-//     get_struct_field_names_and_types(inputtree).map(|(name, _)| name)
-// }
+fn get_struct_field_names(inputtree: &DeriveInput) -> Vec<&Ident> {
+    get_struct_field_names_and_types(inputtree)
+        .iter()
+        .map(|(name, _)| *name)
+        .collect()
+}
 
 fn get_builder_struct_name(inputtree: &DeriveInput) -> Ident {
     format_ident!("{}{}", inputtree.ident, "Builder")
