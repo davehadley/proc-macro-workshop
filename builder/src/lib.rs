@@ -1,21 +1,28 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident, Lit,
-    Meta, NestedMeta, PathArguments, Type,
+    parse_macro_input, spanned::Spanned, Attribute, Data, DeriveInput, Field, Fields,
+    GenericArgument, Ident, Lit, Meta, NestedMeta, PathArguments, Type,
 };
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let inputtree = parse_macro_input!(input as DeriveInput);
+    let output = match generate_derive_code(&inputtree) {
+        Ok(stream) => stream,
+        Err(err) => err.to_compile_error(),
+    };
+    output.into()
+}
 
-    let builderfactorycode = generate_builder_factory(&inputtree);
-    let builderstructcode = generate_builder_struct(&inputtree);
-    let builderimplcode = generate_builder_impl(&inputtree);
+fn generate_derive_code(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
+    let builderfactorycode = generate_builder_factory(&inputtree)?;
+    let builderstructcode = generate_builder_struct(&inputtree)?;
+    let builderimplcode = generate_builder_impl(&inputtree)?;
 
     let output = join([builderfactorycode, builderstructcode, builderimplcode]);
     // eprintln!("DEBUG TOKENS: {}", output);
-    output.into()
+    Ok(output)
 }
 
 fn join(iter: impl IntoIterator<Item = TokenStream>) -> TokenStream {
@@ -26,7 +33,7 @@ fn join(iter: impl IntoIterator<Item = TokenStream>) -> TokenStream {
     output
 }
 
-fn generate_builder_factory(inputtree: &DeriveInput) -> TokenStream {
+fn generate_builder_factory(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
     let structname = &inputtree.ident;
     let builderstructname = get_builder_struct_name(inputtree);
     let output = quote! {
@@ -34,13 +41,13 @@ fn generate_builder_factory(inputtree: &DeriveInput) -> TokenStream {
             pub fn builder() -> #builderstructname { #builderstructname::new() }
         }
     };
-    output
+    Ok(output)
 }
 
-fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
+fn generate_builder_struct(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
     let builderstructname = get_builder_struct_name(inputtree);
 
-    let fields = get_parsed_field(inputtree);
+    let fields = get_parsed_field(inputtree)?;
     let fields = fields.iter().map(|field| {
         let ty = get_option_type_inner(field.ty()).unwrap_or_else(|| field.ty());
         let name = field.name();
@@ -54,15 +61,15 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
             #(#fields),*
         }
     };
-    output
+    Ok(output)
 }
 
-fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
+fn generate_builder_impl(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
     let builderstructname = get_builder_struct_name(inputtree);
-    let newmethod = generate_builder_impl_new_method(inputtree);
-    let fieldsetters = generate_builder_impl_field_setters(inputtree);
-    let fieldelementsetters = generate_builder_impl_field_element_setters(inputtree);
-    let buildmethod = generate_builder_impl_build_method(inputtree);
+    let newmethod = generate_builder_impl_new_method(inputtree)?;
+    let fieldsetters = generate_builder_impl_field_setters(inputtree)?;
+    let fieldelementsetters = generate_builder_impl_field_element_setters(inputtree)?;
+    let buildmethod = generate_builder_impl_build_method(inputtree)?;
 
     let output = quote! {
         impl #builderstructname {
@@ -75,11 +82,13 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
             #buildmethod
         }
     };
-    output
+    Ok(output)
 }
 
-fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStream> {
-    let fields = get_parsed_field(inputtree);
+fn generate_builder_impl_field_setters(
+    inputtree: &DeriveInput,
+) -> Result<Vec<TokenStream>, syn::Error> {
+    let fields = get_parsed_field(inputtree)?;
     let fieldsetters = fields
         .iter()
         .filter(|field| field.should_have_set_method())
@@ -95,11 +104,13 @@ fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStre
         })
         .collect();
 
-    fieldsetters
+    Ok(fieldsetters)
 }
 
-fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<TokenStream> {
-    let fields = get_struct_vec_fields(inputtree);
+fn generate_builder_impl_field_element_setters(
+    inputtree: &DeriveInput,
+) -> Result<Vec<TokenStream>, syn::Error> {
+    let fields = get_struct_vec_fields(inputtree)?;
     let fieldelementsetters = fields
         .iter()
         .map(|pf| {
@@ -118,11 +129,11 @@ fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<T
         })
         .collect();
 
-    fieldelementsetters
+    Ok(fieldelementsetters)
 }
 
-fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
-    let fields = get_parsed_field(inputtree);
+fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
+    let fields = get_parsed_field(inputtree)?;
     let fieldnames = fields.iter().map(|field| field.name());
     let checkforunset = fields.iter().map(|field| {
         let name = field.name();
@@ -150,11 +161,11 @@ fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
         }
     };
 
-    buildmethod
+    Ok(buildmethod)
 }
 
-fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> TokenStream {
-    let fields = get_parsed_field(inputtree);
+fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
+    let fields = get_parsed_field(inputtree)?;
     let fields = fields.iter().map(|it| {
         let name = it.name();
         if it.has_vec_attribute() {
@@ -163,16 +174,17 @@ fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> TokenStream {
             quote! { #name: None }
         }
     });
-    quote! {
+    let output = quote! {
         pub fn new() -> Self {
             Self {
                 #(#fields),*
             }
         }
-    }
+    };
+    Ok(output)
 }
 
-fn get_parsed_field(inputtree: &DeriveInput) -> Vec<ParsedField> {
+fn get_parsed_field(inputtree: &DeriveInput) -> Result<Vec<ParsedField>, syn::Error> {
     let fields = if let Data::Struct(datastruct) = &inputtree.data {
         &datastruct.fields
     } else {
@@ -218,22 +230,25 @@ fn is_option_type(ty: &Type) -> bool {
     get_option_type_inner(ty).is_some()
 }
 
-fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<ParsedField> {
+fn get_struct_vec_fields(inputtree: &DeriveInput) -> Result<Vec<ParsedField>, syn::Error> {
     let fields = if let Data::Struct(datastruct) = &inputtree.data {
         &datastruct.fields
     } else {
         unimplemented!()
     };
-    if let Fields::Named(namedfields) = fields {
+    let result = if let Fields::Named(namedfields) = fields {
         namedfields
             .named
             .iter()
             .map(ParsedField::new)
+            .collect::<Result<Vec<_>, syn::Error>>()?
+            .into_iter()
             .filter(|pf| pf.vecattr.is_some())
             .collect()
     } else {
         Vec::new()
-    }
+    };
+    Ok(result)
 }
 
 #[derive(Clone)]
@@ -244,21 +259,23 @@ struct ParsedField {
 }
 
 impl ParsedField {
-    fn new(field: &Field) -> Self {
+    fn new(field: &Field) -> Result<Self, syn::Error> {
         let vecattr = field
             .attrs
             .iter()
             .map(parse_vec_attribute)
+            .collect::<Result<Vec<Option<ParsedVecAttribute>>, syn::Error>>()?
+            .into_iter()
             .find(|att| att.is_some())
             .flatten();
-        Self {
+        Ok(Self {
             field: field.clone(),
             vecattr,
             _name: field
                 .ident
                 .clone()
                 .expect("only named fields are supported"),
-        }
+        })
     }
 
     fn name(&self) -> &Ident {
@@ -281,10 +298,12 @@ impl ParsedField {
     }
 }
 
-impl From<&Field> for ParsedField {
-    fn from(field: &Field) -> Self {
+impl TryFrom<&Field> for ParsedField {
+    fn try_from(field: &Field) -> Result<Self, Self::Error> {
         ParsedField::new(field)
     }
+
+    type Error = syn::Error;
 }
 
 #[derive(Debug, Clone)]
@@ -300,18 +319,23 @@ impl ParsedVecAttribute {
     }
 }
 
-fn parse_vec_attribute(attr: &Attribute) -> Option<ParsedVecAttribute> {
-    if attr.path.segments.iter().last()?.ident == "builder" {
-        let meta = attr.parse_meta().ok()?;
+fn parse_vec_attribute(attr: &Attribute) -> Result<Option<ParsedVecAttribute>, syn::Error> {
+    let err = || syn::Error::new(attr.span(), format!("invalid attribute: {}", attr.tokens));
+    if attr.path.segments.iter().last().ok_or_else(err)?.ident == "builder" {
+        let meta = attr.parse_meta()?;
         if let Meta::List(metalist) = meta {
-            if let NestedMeta::Meta(syn::Meta::NameValue(value)) = metalist.nested.iter().next()? {
-                if value.path.segments.iter().last()?.ident == "each" {
+            if let NestedMeta::Meta(syn::Meta::NameValue(value)) =
+                metalist.nested.iter().next().ok_or_else(err)?
+            {
+                if value.path.segments.iter().last().ok_or_else(err)?.ident == "each" {
                     if let Lit::Str(lit) = &value.lit {
-                        return Some(ParsedVecAttribute::new(lit.value()));
+                        return Ok(Some(ParsedVecAttribute::new(lit.value())));
                     }
                 }
             };
         };
+    } else {
+        return Ok(None);
     }
-    None
+    Err(err())
 }
