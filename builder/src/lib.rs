@@ -16,9 +16,9 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 fn generate_derive_code(inputtree: &DeriveInput) -> Result<TokenStream, syn::Error> {
-    let builderfactorycode = generate_builder_factory(&inputtree)?;
-    let builderstructcode = generate_builder_struct(&inputtree)?;
-    let builderimplcode = generate_builder_impl(&inputtree)?;
+    let builderfactorycode = generate_builder_factory(inputtree)?;
+    let builderstructcode = generate_builder_struct(inputtree)?;
+    let builderimplcode = generate_builder_impl(inputtree)?;
 
     let output = join([builderfactorycode, builderstructcode, builderimplcode]);
     // eprintln!("DEBUG TOKENS: {}", output);
