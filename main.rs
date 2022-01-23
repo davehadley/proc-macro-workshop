@@ -12,7 +12,7 @@ fn main() {
     #[derive(Builder)]
     pub struct MyStruct {
         value1: u32,
-        value2: u64,
-        value3: Option<f64>,
+        #[builder(each = "value2_single")]
+        value2: Vec<u8>,
     }
 }

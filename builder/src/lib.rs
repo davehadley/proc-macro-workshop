@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident,
-    PathArguments, Type,
+    parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident, Lit,
+    Meta, NestedMeta, PathArguments, Type,
 };
 
 #[proc_macro_derive(Builder, attributes(builder))]
@@ -14,7 +14,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let builderimplcode = generate_builder_impl(&inputtree);
 
     let output = join([builderfactorycode, builderstructcode, builderimplcode]);
-
+    eprintln!("DEBUG TOKENS: {}", output);
     output.into()
 }
 
@@ -60,7 +60,7 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
     let builderstructname = get_builder_struct_name(inputtree);
     let newmethod = generate_builder_impl_new_method(inputtree);
     let fieldsetters = generate_builder_impl_field_setters(inputtree);
-    //let fieldelementsetters = generate_builder_impl_field_element_setters(inputtree);
+    let fieldelementsetters = generate_builder_impl_field_element_setters(inputtree);
     let buildmethod = generate_builder_impl_build_method(inputtree);
 
     let output = quote! {
@@ -69,7 +69,7 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
 
             #(#fieldsetters)*
 
-            //#(fieldelementsetters)*
+            #(#fieldelementsetters)*
 
             #buildmethod
         }
@@ -101,10 +101,14 @@ fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<T
         .iter()
         .map(|(field, attr)| {
             let ty = get_vec_type_inner(&field.ty);
-            let name = parse_vec_attribute(*attr).unwrap().method_name;
+            let methodname = parse_vec_attribute(*attr).unwrap().method;
+            let fieldname = field.ident.clone().unwrap();
             quote! {
-                    fn #name(&mut self, #name: #ty) -> &mut Self {
-                        self.#name.push(#name);
+                    fn #methodname(&mut self, #methodname: #ty) -> &mut Self {
+
+                        self.#fieldname
+                        .get_or_insert_with(|| Vec::new())
+                        .push(#methodname);
                         self
                     }
             }
@@ -185,10 +189,10 @@ fn get_builder_struct_name(inputtree: &DeriveInput) -> Ident {
     format_ident!("{}{}", inputtree.ident, "Builder")
 }
 
-fn get_option_type_inner(ty: &Type) -> Option<&Type> {
+fn get_container_type_inner<'a>(ty: &'a Type, containername: &str) -> Option<&'a Type> {
     if let Type::Path(typepath) = ty {
         if let Some(seg) = typepath.path.segments.iter().last() {
-            if seg.ident == "Option" {
+            if seg.ident == containername {
                 if let PathArguments::AngleBracketed(args) = &seg.arguments {
                     if let Some(GenericArgument::Type(ref inner)) = args.args.first() {
                         return Some(inner);
@@ -200,8 +204,12 @@ fn get_option_type_inner(ty: &Type) -> Option<&Type> {
     None
 }
 
+fn get_option_type_inner(ty: &Type) -> Option<&Type> {
+    get_container_type_inner(ty, "Option")
+}
+
 fn get_vec_type_inner(ty: &Type) -> Option<&Type> {
-    todo!()
+    get_container_type_inner(ty, "Vec")
 }
 
 fn is_option_type(ty: &Type) -> bool {
@@ -219,10 +227,14 @@ fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
             .named
             .iter()
             .map(|field| {
-                let att = field.attrs.iter().find(|att| todo!());
+                let att = field
+                    .attrs
+                    .iter()
+                    .find(|att| parse_vec_attribute(att).is_some());
+                eprintln!("DEBUG field {:?} has att={:?}", field.ident, att.is_some());
                 (field, att)
             })
-            .filter(|(field, att)| att.is_some())
+            .filter(|(_field, att)| att.is_some())
             .map(|(field, att)| (field, att.unwrap()))
             .collect()
     } else {
@@ -231,12 +243,30 @@ fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
 }
 
 struct ParsedVecAttribute {
-    method_name: String,
+    method: Ident,
+}
+
+impl ParsedVecAttribute {
+    fn new(method_name: String) -> Self {
+        let method = format_ident!("{}", method_name);
+        Self { method }
+    }
 }
 
 fn parse_vec_attribute(attr: &Attribute) -> Option<ParsedVecAttribute> {
+    if attr.path.segments.iter().last()?.ident == "builder" {
+        let meta = attr.parse_meta().ok()?;
+        if let Meta::List(metalist) = meta {
+            if let NestedMeta::Meta(nestedmeta) = metalist.nested.iter().next()? {
+                if let syn::Meta::NameValue(value) = nestedmeta {
+                    if value.path.segments.iter().last()?.ident == "each" {
+                        if let Lit::Str(lit) = &value.lit {
+                            return Some(ParsedVecAttribute::new(lit.value()));
+                        }
+                    }
+                };
+            };
+        };
+    }
     None
-    // Some(ParsedVecAttribute {
-
-    // })
 }
