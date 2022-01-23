@@ -154,11 +154,19 @@ fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
 }
 
 fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> TokenStream {
-    let fieldnames = get_struct_field_names(inputtree);
+    let fields = get_parsed_field(inputtree);
+    let fields = fields.iter().map(|it| {
+        let name = it.name();
+        if it.has_vec_attribute() {
+            quote! { #name: Some(Vec::new()) }
+        } else {
+            quote! { #name: None }
+        }
+    });
     quote! {
         pub fn new() -> Self {
             Self {
-                #(#fieldnames: None),*
+                #(#fields),*
             }
         }
     }
@@ -177,31 +185,6 @@ fn get_parsed_field(inputtree: &DeriveInput) -> Vec<ParsedField> {
     };
 
     fields.collect()
-}
-
-// fn get_struct_field_names_and_types(inputtree: &DeriveInput) -> Vec<(&Ident, &Type)> {
-//     let fields = if let Data::Struct(datastruct) = &inputtree.data {
-//         &datastruct.fields
-//     } else {
-//         unimplemented!()
-//     };
-//     let fields = if let Fields::Named(namedfields) = fields {
-//         namedfields
-//             .named
-//             .iter()
-//             .map(|it| (it.ident.as_ref().expect("fields must be named"), &it.ty))
-//     } else {
-//         unimplemented!()
-//     };
-
-//     fields.collect()
-// }
-
-fn get_struct_field_names(inputtree: &DeriveInput) -> Vec<Ident> {
-    get_parsed_field(inputtree)
-        .iter()
-        .map(|field| field.name().clone())
-        .collect()
 }
 
 fn get_builder_struct_name(inputtree: &DeriveInput) -> Ident {
@@ -291,6 +274,10 @@ impl ParsedField {
             Some(att) => att.method != self._name,
             None => true,
         }
+    }
+
+    fn has_vec_attribute(&self) -> bool {
+        self.vecattr.is_some()
     }
 }
 
