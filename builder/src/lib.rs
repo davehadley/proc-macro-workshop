@@ -320,7 +320,7 @@ impl ParsedVecAttribute {
 }
 
 fn parse_vec_attribute(attr: &Attribute) -> Result<Option<ParsedVecAttribute>, syn::Error> {
-    let err = || syn::Error::new(attr.span(), format!("invalid attribute: {}", attr.tokens));
+    let err = || syn::Error::new(attr.tokens.span(), "expected `builder(each = \"...\")`");
     if attr.path.segments.iter().last().ok_or_else(err)?.ident == "builder" {
         let meta = attr.parse_meta()?;
         if let Meta::List(metalist) = meta {
