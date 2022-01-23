@@ -14,7 +14,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let builderimplcode = generate_builder_impl(&inputtree);
 
     let output = join([builderfactorycode, builderstructcode, builderimplcode]);
-    eprintln!("DEBUG TOKENS: {}", output);
+    // eprintln!("DEBUG TOKENS: {}", output);
     output.into()
 }
 
@@ -40,9 +40,10 @@ fn generate_builder_factory(inputtree: &DeriveInput) -> TokenStream {
 fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
     let builderstructname = get_builder_struct_name(inputtree);
 
-    let fields = get_struct_field_names_and_types(inputtree);
-    let fields = fields.iter().map(|(name, ty)| {
-        let ty = get_option_type_inner(ty).unwrap_or(ty);
+    let fields = get_parsed_field(inputtree);
+    let fields = fields.iter().map(|field| {
+        let ty = get_option_type_inner(field.ty()).unwrap_or(field.ty());
+        let name = field.name();
         quote! {
             #name: Option<#ty>
         }
@@ -78,11 +79,13 @@ fn generate_builder_impl(inputtree: &DeriveInput) -> TokenStream {
 }
 
 fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStream> {
-    let fields = get_struct_field_names_and_types(inputtree);
+    let fields = get_parsed_field(inputtree);
     let fieldsetters = fields
         .iter()
-        .map(|(name, ty)| {
-            let ty = get_option_type_inner(ty).unwrap_or(ty);
+        .filter(|field| field.should_have_set_method())
+        .map(|field| {
+            let ty = get_option_type_inner(field.ty()).unwrap_or(field.ty());
+            let name = field.name();
             quote! {
                     fn #name(&mut self, #name: #ty) -> &mut Self {
                         self.#name = Some(#name);
@@ -99,10 +102,10 @@ fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<T
     let fields = get_struct_vec_fields(inputtree);
     let fieldelementsetters = fields
         .iter()
-        .map(|(field, attr)| {
-            let ty = get_vec_type_inner(&field.ty);
-            let methodname = parse_vec_attribute(*attr).unwrap().method;
-            let fieldname = field.ident.clone().unwrap();
+        .map(|pf| {
+            let ty = get_vec_type_inner(&pf.field.ty);
+            let methodname = pf.vecattr.clone().unwrap().method;
+            let fieldname = pf.field.ident.clone().unwrap();
             quote! {
                     fn #methodname(&mut self, #methodname: #ty) -> &mut Self {
 
@@ -119,10 +122,11 @@ fn generate_builder_impl_field_element_setters(inputtree: &DeriveInput) -> Vec<T
 }
 
 fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> TokenStream {
-    let fields = get_struct_field_names_and_types(inputtree);
-    let fieldnames = fields.iter().map(|(name, _)| name);
-    let checkforunset = fields.iter().map(|(name, ty)| {
-        if is_option_type(ty) {
+    let fields = get_parsed_field(inputtree);
+    let fieldnames = fields.iter().map(|field| field.name());
+    let checkforunset = fields.iter().map(|field| {
+        let name = field.name();
+        if is_option_type(field.ty()) {
             quote! { let #name = self.#name.clone(); }
         } else {
             let msg = format!("{} must be set", name);
@@ -160,17 +164,14 @@ fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> TokenStream {
     }
 }
 
-fn get_struct_field_names_and_types(inputtree: &DeriveInput) -> Vec<(&Ident, &Type)> {
+fn get_parsed_field(inputtree: &DeriveInput) -> Vec<ParsedField> {
     let fields = if let Data::Struct(datastruct) = &inputtree.data {
         &datastruct.fields
     } else {
         unimplemented!()
     };
     let fields = if let Fields::Named(namedfields) = fields {
-        namedfields
-            .named
-            .iter()
-            .map(|it| (it.ident.as_ref().expect("fields must be named"), &it.ty))
+        namedfields.named.iter().map(|it| ParsedField::new(it))
     } else {
         unimplemented!()
     };
@@ -178,10 +179,28 @@ fn get_struct_field_names_and_types(inputtree: &DeriveInput) -> Vec<(&Ident, &Ty
     fields.collect()
 }
 
-fn get_struct_field_names(inputtree: &DeriveInput) -> Vec<&Ident> {
-    get_struct_field_names_and_types(inputtree)
+// fn get_struct_field_names_and_types(inputtree: &DeriveInput) -> Vec<(&Ident, &Type)> {
+//     let fields = if let Data::Struct(datastruct) = &inputtree.data {
+//         &datastruct.fields
+//     } else {
+//         unimplemented!()
+//     };
+//     let fields = if let Fields::Named(namedfields) = fields {
+//         namedfields
+//             .named
+//             .iter()
+//             .map(|it| (it.ident.as_ref().expect("fields must be named"), &it.ty))
+//     } else {
+//         unimplemented!()
+//     };
+
+//     fields.collect()
+// }
+
+fn get_struct_field_names(inputtree: &DeriveInput) -> Vec<Ident> {
+    get_parsed_field(inputtree)
         .iter()
-        .map(|(name, _)| *name)
+        .map(|field| field.name().clone())
         .collect()
 }
 
@@ -216,7 +235,7 @@ fn is_option_type(ty: &Type) -> bool {
     get_option_type_inner(ty).is_some()
 }
 
-fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
+fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<ParsedField> {
     let fields = if let Data::Struct(datastruct) = &inputtree.data {
         &datastruct.fields
     } else {
@@ -226,21 +245,62 @@ fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
         namedfields
             .named
             .iter()
-            .map(|field| {
-                let att = field
-                    .attrs
-                    .iter()
-                    .find(|att| parse_vec_attribute(att).is_some());
-                eprintln!("DEBUG field {:?} has att={:?}", field.ident, att.is_some());
-                (field, att)
-            })
-            .filter(|(_field, att)| att.is_some())
-            .map(|(field, att)| (field, att.unwrap()))
+            .map(|field| ParsedField::new(field))
+            .filter(|pf| pf.vecattr.is_some())
             .collect()
     } else {
         Vec::new()
     }
 }
+
+#[derive(Clone)]
+struct ParsedField {
+    field: Field,
+    vecattr: Option<ParsedVecAttribute>,
+    _name: Ident,
+}
+
+impl ParsedField {
+    fn new(field: &Field) -> Self {
+        let vecattr = field
+            .attrs
+            .iter()
+            .map(|att| parse_vec_attribute(att))
+            .find(|att| att.is_some())
+            .flatten();
+        Self {
+            field: field.clone(),
+            vecattr,
+            _name: field
+                .ident
+                .clone()
+                .expect("only named fields are supported"),
+        }
+    }
+
+    fn name(&self) -> &Ident {
+        &self._name
+    }
+
+    fn ty(&self) -> &Type {
+        &self.field.ty
+    }
+
+    fn should_have_set_method(&self) -> bool {
+        match &self.vecattr {
+            Some(att) => att.method != self._name,
+            None => true,
+        }
+    }
+}
+
+impl From<&Field> for ParsedField {
+    fn from(field: &Field) -> Self {
+        ParsedField::new(field)
+    }
+}
+
+#[derive(Debug, Clone)]
 
 struct ParsedVecAttribute {
     method: Ident,
