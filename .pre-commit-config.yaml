@@ -1,0 +1,32 @@
+default_stages: [commit]
+
+repos:
+
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.0.1
+  hooks:
+    - id: check-added-large-files
+    - id: check-ast
+      exclude: ^templates/.*$
+    - id: check-merge-conflict
+    - id: check-toml
+      exclude: ^templates/.*$
+    - id: mixed-line-ending
+      stages: [commit]
+
+- repo: local
+  hooks:
+  - id: rustfmt
+    name: rustfmt
+    entry: rustfmt
+    language: system
+    types: [rust]
+
+- repo: local
+  hooks:
+  - id: rustclippy
+    name: rustclippy
+    entry: cargo clippy --all-targets --all-features -- -Dclippy::all
+    pass_filenames: false
+    language: system
+    types: [rust]
