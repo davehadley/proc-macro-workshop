@@ -42,7 +42,7 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> TokenStream {
 
     let fields = get_parsed_field(inputtree);
     let fields = fields.iter().map(|field| {
-        let ty = get_option_type_inner(field.ty()).unwrap_or(field.ty());
+        let ty = get_option_type_inner(field.ty()).unwrap_or_else(|| field.ty());
         let name = field.name();
         quote! {
             #name: Option<#ty>
@@ -84,7 +84,7 @@ fn generate_builder_impl_field_setters(inputtree: &DeriveInput) -> Vec<TokenStre
         .iter()
         .filter(|field| field.should_have_set_method())
         .map(|field| {
-            let ty = get_option_type_inner(field.ty()).unwrap_or(field.ty());
+            let ty = get_option_type_inner(field.ty()).unwrap_or_else(|| field.ty());
             let name = field.name();
             quote! {
                     fn #name(&mut self, #name: #ty) -> &mut Self {
@@ -179,7 +179,7 @@ fn get_parsed_field(inputtree: &DeriveInput) -> Vec<ParsedField> {
         unimplemented!()
     };
     let fields = if let Fields::Named(namedfields) = fields {
-        namedfields.named.iter().map(|it| ParsedField::new(it))
+        namedfields.named.iter().map(ParsedField::new)
     } else {
         unimplemented!()
     };
@@ -228,7 +228,7 @@ fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<ParsedField> {
         namedfields
             .named
             .iter()
-            .map(|field| ParsedField::new(field))
+            .map(ParsedField::new)
             .filter(|pf| pf.vecattr.is_some())
             .collect()
     } else {
@@ -248,7 +248,7 @@ impl ParsedField {
         let vecattr = field
             .attrs
             .iter()
-            .map(|att| parse_vec_attribute(att))
+            .map(parse_vec_attribute)
             .find(|att| att.is_some())
             .flatten();
         Self {
@@ -304,14 +304,12 @@ fn parse_vec_attribute(attr: &Attribute) -> Option<ParsedVecAttribute> {
     if attr.path.segments.iter().last()?.ident == "builder" {
         let meta = attr.parse_meta().ok()?;
         if let Meta::List(metalist) = meta {
-            if let NestedMeta::Meta(nestedmeta) = metalist.nested.iter().next()? {
-                if let syn::Meta::NameValue(value) = nestedmeta {
-                    if value.path.segments.iter().last()?.ident == "each" {
-                        if let Lit::Str(lit) = &value.lit {
-                            return Some(ParsedVecAttribute::new(lit.value()));
-                        }
+            if let NestedMeta::Meta(syn::Meta::NameValue(value)) = metalist.nested.iter().next()? {
+                if value.path.segments.iter().last()?.ident == "each" {
+                    if let Lit::Str(lit) = &value.lit {
+                        return Some(ParsedVecAttribute::new(lit.value()));
                     }
-                };
+                }
             };
         };
     }
