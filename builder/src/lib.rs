@@ -52,7 +52,7 @@ fn generate_builder_struct(inputtree: &DeriveInput) -> Result<TokenStream, syn::
         let ty = get_option_type_inner(field.ty()).unwrap_or_else(|| field.ty());
         let name = field.name();
         quote! {
-            #name: Option<#ty>
+            #name: ::std::option::Option<#ty>
         }
     });
 
@@ -97,7 +97,7 @@ fn generate_builder_impl_field_setters(
             let name = field.name();
             quote! {
                     fn #name(&mut self, #name: #ty) -> &mut Self {
-                        self.#name = Some(#name);
+                        self.#name = ::std::option::Option::Some(#name);
                         self
                     }
             }
@@ -121,7 +121,7 @@ fn generate_builder_impl_field_element_setters(
                     fn #methodname(&mut self, #methodname: #ty) -> &mut Self {
 
                         self.#fieldname
-                        .get_or_insert_with(|| Vec::new())
+                        .get_or_insert_with(|| ::std::vec::Vec::new())
                         .push(#methodname);
                         self
                     }
@@ -143,17 +143,17 @@ fn generate_builder_impl_build_method(inputtree: &DeriveInput) -> Result<TokenSt
             let msg = format!("{} must be set", name);
             quote! {
                 let #name = match &self.#name {
-                    Some(inner) => inner.clone(),
-                    None => return Err(#msg.into()),
+                    ::std::option::Option::Some(inner) => inner.clone(),
+                    ::std::option::Option::None => return ::std::result::Result::Err(#msg.into()),
                 };
             }
         }
     });
     let structname = &inputtree.ident;
     let buildmethod = quote! {
-        pub fn build(&mut self) -> Result<#structname, Box<dyn std::error::Error>> {
+        pub fn build(&mut self) -> ::std::result::Result<#structname, ::std::boxed::Box<dyn ::std::error::Error>> {
             #(#checkforunset)*
-            Ok(
+            ::std::result::Result::Ok(
                 #structname {
                     #(#fieldnames),*
                 }
@@ -169,9 +169,9 @@ fn generate_builder_impl_new_method(inputtree: &DeriveInput) -> Result<TokenStre
     let fields = fields.iter().map(|it| {
         let name = it.name();
         if it.has_vec_attribute() {
-            quote! { #name: Some(Vec::new()) }
+            quote! { #name: ::std::option::Option::Some(::std::vec::Vec::new()) }
         } else {
-            quote! { #name: None }
+            quote! { #name: ::std::option::Option::None }
         }
     });
     let output = quote! {
