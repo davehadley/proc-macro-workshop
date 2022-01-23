@@ -190,8 +190,8 @@ fn get_option_type_inner(ty: &Type) -> Option<&Type> {
         if let Some(seg) = typepath.path.segments.iter().last() {
             if seg.ident == "Option" {
                 if let PathArguments::AngleBracketed(args) = &seg.arguments {
-                    if let Some(GenericArgument::Type(inner)) = args.args.first() {
-                        return Some(&inner);
+                    if let Some(GenericArgument::Type(ref inner)) = args.args.first() {
+                        return Some(inner);
                     }
                 }
             }
@@ -219,7 +219,7 @@ fn get_struct_vec_fields(inputtree: &DeriveInput) -> Vec<(&Field, &Attribute)> {
             .named
             .iter()
             .map(|field| {
-                let att = field.attrs.iter().filter(|att| todo!()).next();
+                let att = field.attrs.iter().find(|att| todo!());
                 (field, att)
             })
             .filter(|(field, att)| att.is_some())
